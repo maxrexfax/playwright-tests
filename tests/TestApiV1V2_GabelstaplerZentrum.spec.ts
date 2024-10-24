@@ -1,5 +1,6 @@
 import {APIRequestContext, expect, Page, test} from "@playwright/test";
 import fileSystem from "fs";
+import Ajv from 'ajv';
 
 import {
     appendLogStringToFileAndConsole, createDirIfNotExist,
@@ -22,6 +23,7 @@ let logFileForPriceErrors = './logs/logFileForPriceErrors.json';
 let errorsInArrayCount = 0;
 
 test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
+    const ajv = new Ajv();
 
     test.beforeAll("Inside block before all try to get auth token", async ({ browser }) => {
        // ниже 4 строки моя попытка читать параметры командной строки. пока видит только node.exe и process.js
@@ -42,7 +44,7 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
             // console.log('requestBodyLoginData:', requestBodyLoginData)
             let urlToGetToken = 'https://api.live.symfio.de/api/v2/backend/login';
             // const responseV2 = await sendPostRequest(page.request, urlToGetToken, requestBodyLoginData);
-            const responseV2 = await sendRequest(page.request, 'post', urlToGetToken, requestBodyLoginData, '', process.env.SITE_ORIGIN, process.env.SITE_REFERER);
+            const responseV2 = await sendRequest(page.request, 'post', urlToGetToken, requestBodyLoginData, '', process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
             const responseBodyV2 = await responseV2.json();
             token = responseBodyV2['data']['token'];
         });
@@ -54,7 +56,7 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
             startDateTime = Date.now();
             await markStartTest('Test ' + process.env.SITE_NAME + ' api V1 vs V2');
             const urlToFrontendApi = 'https://backend.symfio.de/frontend/api/frontend/v1/vehicles?domain=' + process.env.SITE_NAME;
-            const responseV1 = await sendRequest(request, 'get', urlToFrontendApi, {}, '', process.env.SITE_ORIGIN, process.env.SITE_REFERER);
+            const responseV1 = await sendRequest(request, 'get', urlToFrontendApi, {}, '', process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
             const responseBodyV1 = await responseV1.json();
             frontendApiTotal = responseBodyV1['info']['total'];
             console.log("frontendApiTotal:" + frontendApiTotal);
@@ -70,7 +72,7 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
                 'filters': {'status': 'Inventory'}
             }
             // const gotResponseDashboardVehicles = await sendPostRequest(request, urlToGetListVehiclesForDashboard, requestBodyData);
-            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_ORIGIN, process.env.SITE_REFERER);
+            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
             console.log("gotResponseDashboardVehicles:" + gotResponseDashboardVehicles);
             const responseBodyVehicles = await gotResponseDashboardVehicles.json();
             // let resultLength = responseBodyVehicles['data'].length;
@@ -104,7 +106,7 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
                 "page":pageNumber,
             }
             pageNumber++;
-            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_ORIGIN, process.env.SITE_REFERER);
+            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
             const responseBodyVehicles = await gotResponseDashboardVehicles.json();
             if (undefined === dashboardVehiclesTotalNew) {
                 dashboardVehiclesTotalNew = responseBodyVehicles['info']['total'];
@@ -116,11 +118,14 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
                 isVehiclesExist = false;
             }
             if(stepErrors.length > 0) {
-                arrayOfErrors.push(arrayOfErrors, stepErrors);
+                console.log('stepErrors:', stepErrors);
+                arrayOfErrors = arrayOfErrors.concat(stepErrors);
                 stepErrors = [];
             }
         }
+        console.log('arrayOfErrors:', arrayOfErrors);
         errorsInArrayCount = Object.keys(arrayOfErrors).length;
+        console.log('errorsInArrayCount:', errorsInArrayCount);
         if (errorsInArrayCount > 0) {
             await appendLogStringToFileAndConsole(logFileForPriceErrors, "\n\t\"errors found\":\"" + errorsInArrayCount + "\",", false);
             let stringErrors = '';
@@ -133,6 +138,7 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
                 });
             });
         } else {
+            await appendLogStringToFileAndConsole(logFileForPriceErrors, "\n\t\"errors found\":\"0\",", false);
             await test.step("No errors found", async () => {
                 expect(arrayOfErrors.length < 1).toBeTruthy();
                 console.log("No errors found");
@@ -143,62 +149,144 @@ test.describe("Perform group of tests for:" + process.env.SITE_NAME, () => {
 
     test('Test ' + process.env.SITE_NAME + ' api V1 vs V2 returns equal last createdAt vehicles', async ({request}) => {
         let startDateTime;
-        // захожу в админское апи беру там с сортировкой последние
-        // сохраняю их айдищники
-        // тот же запрос на фронтенд апи
-        // сохраняю айди
-        // сравниваю массивы, должны совпадать
+        let dashboardStocks;
         await test.step("Start test - get list of last created vehicles for dashboard", async () => {
             startDateTime = Date.now();
-            await markStartTest('Test ' + process.env.SITE_NAME + ' api V1 vs V2');
+            await markStartTest('Test ' + process.env.SITE_NAME + ' get list of last created vehicles for dashboard');
             const requestBodyData = {
-                'filters': {'status': 'Inventory'},
+                'filters': {'status': 'Inventory', 'title':'New'},
                 "sortBy":"createdAt",
                 "order":"descend",
-                "pageSize": 10
+                "pageSize": 12
             }
             const urlToGetListVehiclesForDashboard = 'https://api.live.symfio.de/en/api/v2/backend/vehicles';
-            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_ORIGIN, process.env.SITE_REFERER);
+            const gotResponseDashboardVehicles = await sendRequest(request, 'post', urlToGetListVehiclesForDashboard, requestBodyData, token, process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
             const responseBodyDashboardVehicles = await gotResponseDashboardVehicles.json();
             const dataDashboardVehicles = responseBodyDashboardVehicles['data'];
             // const dashboardIds = dataDashboardVehicles.map(function (vehicle) {
             //     return vehicle.id;
             // });
             const dashboardIds = dataDashboardVehicles.map(({ id }) => id);
-            console.log("dashboardIds:", dashboardIds);
+            dashboardIds.sort();
+            dashboardStocks = dataDashboardVehicles.map(({ stock }) => stock);
+            dashboardStocks.sort();
+            //console.log("dashboardIds:", dashboardIds);
+            //console.log("dashboardStocks:", dashboardStocks);
+        });
+        let frontendStocks;
+        await test.step("Get list of last created vehicles for frontend", async () => {
+            // const urlToFrontendApi = 'https://backend.symfio.de/frontend/api/frontend/v1/vehicles?limit=10&title=New&domain=' + process.env.SITE_NAME;
+            // const urlToFrontendApi = 'https://gabelstapler-zentrum.de/api/vehicles?title=New&sort_by=last_added&sort_order=desc&limit=12&domain=' + process.env.SITE_NAME;
+            const urlToFrontendApi = 'https://backend.symfio.de/frontend/api/frontend/v1/vehicles?title=New&sort_by=last_added&sort_order=desc&limit=12&domain=' + process.env.SITE_NAME;
+
+            const responseV1 = await sendRequest(request, 'get', urlToFrontendApi, {}, '', '', '');
+            // const responseV1 = await sendGetRequest(test, request, urlToFrontendApi, 'get', headers);
+            const responseBodyV1 = await responseV1.json();
+            const dataFrontendVehicles = responseBodyV1['data'];
+            const frontendIds = dataFrontendVehicles.map(({id}) => id);
+            frontendIds.sort();
+            frontendStocks = dataFrontendVehicles.map(({stock}) => stock);
+            frontendStocks.sort();
         });
 
-        const urlToFrontendApi = 'https://backend.symfio.de/frontend/api/frontend/v1/vehicles?domain=' + process.env.SITE_NAME;
+        await test.step("Compare list for frontend and dashboard", async () => {
+            expect(await compareArrays(frontendStocks, dashboardStocks)).toBeTruthy();
+        });
 
-        // const headers = {
-        //     'host': 'gabelstapler-zentrum.de',
-        //     'Referer': 'https://gabelstapler-zentrum.de/en/fahrzeugsuche.html?title=New',
-        //     'Content-Type': 'application/json',
-        //     'Accept': 'application/json',
-        //     'Accept-Encoding': 'gzip, deflate, br'
-        // };
-        const responseV1 = await sendRequest(request, 'get', urlToFrontendApi, {}, '', process.env.SITE_ORIGIN, process.env.SITE_REFERER);
-        // const responseV1 = await sendGetRequest(test, request, urlToFrontendApi, 'get', headers);
-        const responseBodyV1 = await responseV1.json();
-        const dataFrontendVehicles = responseBodyV1['data'];
-        const frontendIds = dataFrontendVehicles.map(({ id }) => id);
-        console.log("frontendIds:", frontendIds);
+        await markEndTest('Test ' + process.env.SITE_NAME + ' get list of last created vehicles for dashboard', startDateTime);
+    });
 
-        await markEndTest('Test comparison of API v1 vs v2 ends', startDateTime);
+
+    test.skip('Test ' + process.env.SITE_NAME + ' dashboard api for pages', async ({request}) => {
+        const urlToGetListPagesForDashboard = 'https://backend.symfio.de/frontend/api/frontend/v1/pages?domain=gabelstapler-zentrum.de';
+        const gotResponseFrontendPages = await sendGetRequest(test, request,  urlToGetListPagesForDashboard, {}, {});
+        const responseBodyFrontendPages = await gotResponseFrontendPages.json();
+        const listOfPages = responseBodyFrontendPages['data'];
+        let frontendPagesIds = listOfPages.map(({id}) => id);
+        frontendPagesIds.sort();
+        // // console.log("pagesIds:", pagesIds);
+        let pageNumber = 1;
+        let isResultExist = true;
+        const urlToGetPagesListForDashboard = 'https://api.live.symfio.de/en/api/v2/backend/pages';
+        let listOfDashboardPagesIds = [];
+        while (isResultExist) {
+            const requestBodyData = {
+                'filters': {'is_mobile	': 'no'},
+                "pageSize":50,
+                "page":pageNumber,
+            }
+            pageNumber++;
+            const gotResponseDashboardPages = await sendRequest(request, 'post', urlToGetPagesListForDashboard, requestBodyData, token, process.env.SITE_HEADERS_ORIGIN, process.env.SITE_HEADERS_REFERER);
+            const responseBodyDashboardPages = await gotResponseDashboardPages.json();
+            let listOfDashboardPages = responseBodyDashboardPages['data'];
+            if (listOfDashboardPages.length > 0) {
+                let tmpPagesIds = listOfDashboardPages.map(({id}) => id);
+                listOfDashboardPagesIds = listOfDashboardPagesIds.concat(tmpPagesIds);
+            } else {
+                isResultExist = false;
+            }
+        }
+
+        listOfDashboardPagesIds.sort();
+        // console.log("frontendPagesIds:", frontendPagesIds);
+        // console.log("listOfDashboardPagesIds:", listOfDashboardPagesIds);
+        console.log("frontendPagesIds.length:", frontendPagesIds.length);
+        console.log("listOfDashboardPagesIds.length:", listOfDashboardPagesIds.length);
+        await test.step("Compare list of IDs for frontend and dashboard PAGES", async () => {
+            console.log("frontendPagesIds == listOfDashboardPagesIds:", frontendPagesIds == listOfDashboardPagesIds);
+            //expect(frontendPagesIds == listOfDashboardPagesIds).toBeTruthy();
+        });
+        // Below example JSON structure match rules check
+        // const valid = ajv.validate(require('../jsonRules/pageInGrid.schema.json'), dataDashboardPages);
+        // // Output the errors text
+        // if (!valid) {
+        //     console.log('AJV Validation Errors:', ajv.errorsText());
+        // }
+        // expect(valid).toBe(true);
     });
 
     test.afterAll("Close log file", async ({ browser }) => {
-        if (errorsInArrayCount === 0) {
-            await appendLogStringToFileAndConsole(logFileForPriceErrors, "\n\t\"errors found\":\"0\",", false);
-        }
         await appendLogStringToFileAndConsole(logFileForPriceErrors, "\n\t\"end time\":\"" + await formatDate(Date.now()) + "\"\n}", false);
     });
 });
 
+// async function printData(frontendStocks, dashboardStocks)
+// {
+//     for (let i = 0; i < frontendStocks.length; i++){
+//         console.log("f: " + frontendStocks[i] + " d: " + dashboardStocks[i]);
+//         console.log(frontendStocks[i] === dashboardStocks[i]);
+//     }
+// }
+async function compareArrays(frontendStocks, dashboardStocks)
+{
+    if (!frontendStocks || !dashboardStocks)
+        return false;
+    // if the argument is the same array, we can be sure the contents are same as well
+    if(frontendStocks === dashboardStocks)
+        return true;
+    // compare lengths - can save a lot of time
+    if (frontendStocks.length != dashboardStocks.length)
+        return false;
+
+    for (var i = 0, l=frontendStocks.length; i < l; i++) {
+        // Check if we have nested arrays
+        if (frontendStocks[i] instanceof Array && dashboardStocks[i] instanceof Array) {
+            // recurse into the nested arrays
+            if (!frontendStocks[i].equals(dashboardStocks[i]))
+                return false;
+        }
+        else if (frontendStocks[i] != dashboardStocks[i]) {
+            // Warning - two different object instances will never be equal: {x:20} != {x:20}
+            return false;
+        }
+    }
+    return true;
+}
+
 //if isNew === 1 то цена видна (show_price===1) и цена не равна 0. isNew===0 то show_price ДОЛЖЕН быть равен 0 OR цена === 0
 async function checkAllVehiclesFromAnswer(listOfVehicles: any) {
     for (const [key, vehicleData] of Object.entries(listOfVehicles)) {
-        console.log("Now check vehicle with ID:" + vehicleData['id']);
+        // console.log("Now check vehicle with ID:" + vehicleData['id']);
         await test.step("Now check vehicle with ID:" + vehicleData['id'], async () => {
             let tmpErrors = [];
             // let message = '';

@@ -13,6 +13,8 @@
   },
   "private": true,
   "dependencies": {
+    "-": "^0.0.1",
+    "ajv": "^8.17.1",
     "dotenv": "^16.0.3"
   }
 }
